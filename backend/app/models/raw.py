@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import JSON, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -47,7 +47,7 @@ class StagedRecord(Base, UUIDMixin):
     record_type: Mapped[str] = mapped_column(String(30), nullable=False)
     extracted_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     confidence_score: Mapped[Decimal | None] = mapped_column(
-        __import__("sqlalchemy").Numeric(5, 4), nullable=True
+        Numeric(5, 4), nullable=True
     )
     confidence_reasons: Mapped[list | None] = mapped_column(JSON, nullable=True)
     match_suggestions: Mapped[list | None] = mapped_column(JSON, nullable=True)

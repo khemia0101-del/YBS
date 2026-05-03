@@ -196,7 +196,6 @@ async def get_concentration_risk(
     all_customers = all_customers_result.scalars().all()
 
     # Compute revenue totals per customer from active contracts
-    concentrations = []
     company_total = Decimal("0")
     customer_revenues: dict[UUID, Decimal] = {}
 
@@ -212,33 +211,6 @@ async def get_concentration_risk(
         customer_revenues[cust.id] = annual_rev
         company_total += annual_rev
 
-    for cust in all_customers:
-        rev = customer_revenues.get(cust.id, Decimal("0"))
-        pct = (rev / company_total * 100) if company_total > 0 else Decimal("0")
-        concentrations.append(
-            ConcentrationResponse(
-                customer_id=cust.id,
-                customer_name=cust.name,
-                revenue_total=rev,
-                concentration_pct=to_money(pct),
-                is_flagged=pct >= 20,
-                contract_count=sum(
-                    1
-                    for _ in await (
-                        await db.execute(
-                            select(func.count(Contract.id)).where(
-                                Contract.customer_id == cust.id, Contract.status == "active"
-                            )
-                        )
-                    )
-                    .scalars()
-                    .all()
-                    if True
-                ),
-            )
-        )
-
-    # Simpler re-implementation for contract counts
     final = []
     for cust in all_customers:
         rev = customer_revenues.get(cust.id, Decimal("0"))
