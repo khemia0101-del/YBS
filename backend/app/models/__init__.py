@@ -29,6 +29,9 @@ from app.models.business import BusinessProfile, MetricDefinition, MetricSnapsho
 # AI interview
 from app.models.interview import InterviewInsight, InterviewMessage, InterviewSession
 
+# Automation roadmap
+from app.models.automation import AutomationItem
+
 # Raw/staged ingestion
 from app.models.raw import RawRecord, StagedRecord
 
@@ -89,6 +92,8 @@ __all__ = [
     "InterviewSession",
     "InterviewMessage",
     "InterviewInsight",
+    # automation
+    "AutomationItem",
     # raw
     "RawRecord",
     "StagedRecord",
