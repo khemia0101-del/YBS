@@ -202,6 +202,35 @@ async def seed() -> None:
                 snap_count += 1
         print(f"  Created {snap_count} CRR metric snapshots")
 
+        # ── CRR QoE run (seeded baseline) ──────────────────────────────────
+        from app.models.esop import QoERun
+        from app.services.qoe.crr_data import CRR_PERIODS, VALUATION_RATIONALE
+        from app.services.qoe.engine import analyze as qoe_analyze
+        from app.services.qoe.valuation import value_by_sde
+
+        crr_qoe = qoe_analyze(CRR_PERIODS, primary_label="FY2024")
+        crr_val = value_by_sde(
+            crr_qoe.primary.sde, 2.0, 2.75, 3.5, rationale=VALUATION_RATIONALE
+        )
+        session.add(
+            QoERun(
+                id=uuid.uuid4(),
+                company_id=crr.id,
+                run_date=date.today(),
+                analysis_period_start=date(2024, 1, 1),
+                analysis_period_end=date(2024, 12, 31),
+                status="draft",
+                reported_ebitda=crr_qoe.primary.reported_ebitda,
+                adjusted_ebitda=crr_qoe.primary.adjusted_ebitda,
+                normalized_ebitda=crr_qoe.primary.sde,
+                evidence_bundle={
+                    "qoe": crr_qoe.as_dict(),
+                    "valuation": crr_val.as_dict(),
+                },
+            )
+        )
+        print("  Created CRR QoE run (FY2024 baseline)")
+
         # ── Labor Burden Assumptions ───────────────────────────────────────
         burden = LaborBurdenAssumption(
             id=uuid.uuid4(),

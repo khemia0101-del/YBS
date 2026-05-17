@@ -6,13 +6,21 @@ from decimal import Decimal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import assert_company_in_tenant, get_tenant_id
+from app.dependencies import (
+    assert_company_in_tenant,
+    get_tenant_id,
+    require_analyst,
+)
 from app.models.business import MetricDefinition, MetricSnapshot
+from app.models.profit import ProfitRecommendation
+from app.models.users import User
+from app.schemas.profit import ProfitRecommendationResponse
 from app.services.business.profile import get_or_create_profile
+from app.services.growth.profit_advisor import build_recommendations
 from app.services.growth.scaling_model import (
     DEFAULT_CHANNELS,
     Channel,
@@ -104,3 +112,36 @@ async def growth_tracker(
         "comparison": plan_vs_actual(plan, actuals),
         "feasibility_notes": plan.feasibility_notes,
     }
+
+
+@router.post("/profit/build", response_model=list[ProfitRecommendationResponse])
+async def build_profit_recommendations(
+    company_id: UUID = Query(...),
+    db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
+    _user: User = Depends(require_analyst),
+) -> list[ProfitRecommendationResponse]:
+    """Refresh profit-improvement recommendations from QoE, KPIs, and interviews."""
+    await assert_company_in_tenant(db, company_id, tenant_id)
+    recs = await build_recommendations(db, company_id)
+    return [ProfitRecommendationResponse.model_validate(r) for r in recs]
+
+
+@router.get("/profit", response_model=list[ProfitRecommendationResponse])
+async def list_profit_recommendations(
+    company_id: UUID = Query(...),
+    db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
+) -> list[ProfitRecommendationResponse]:
+    await assert_company_in_tenant(db, company_id, tenant_id)
+    result = await db.execute(
+        select(ProfitRecommendation)
+        .where(ProfitRecommendation.company_id == company_id)
+        .order_by(
+            func.coalesce(ProfitRecommendation.estimated_annual_impact, 0).desc()
+        )
+    )
+    return [
+        ProfitRecommendationResponse.model_validate(r)
+        for r in result.scalars().all()
+    ]

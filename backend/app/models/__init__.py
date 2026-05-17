@@ -32,6 +32,9 @@ from app.models.interview import InterviewInsight, InterviewMessage, InterviewSe
 # Automation roadmap
 from app.models.automation import AutomationItem
 
+# Profitability recommendations
+from app.models.profit import ProfitRecommendation
+
 # Raw/staged ingestion
 from app.models.raw import RawRecord, StagedRecord
 
@@ -94,6 +97,8 @@ __all__ = [
     "InterviewInsight",
     # automation
     "AutomationItem",
+    # profit
+    "ProfitRecommendation",
     # raw
     "RawRecord",
     "StagedRecord",
