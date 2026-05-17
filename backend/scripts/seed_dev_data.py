@@ -170,6 +170,67 @@ async def seed() -> None:
             f"  Created CRR business profile + {len(crr_metrics)} metric definitions"
         )
 
+        # ── CRR metric snapshots (Jan-May 2025 trend) ──────────────────────
+        from app.models.business import MetricSnapshot
+
+        by_key = {m.key: m for m in crr_metrics}
+        snapshot_data = {
+            "active_members": [180, 185, 190, 196, 205],
+            "mrr": [21000, 21500, 22000, 22500, 23000],
+            "new_enrollments": [5, 6, 5, 6, 6],
+            "files_per_month": [10, 12, 11, 13, 12],
+            "gross_margin": [97.4, 97.3, 97.5, 97.4, 97.4],
+        }
+        months_2025 = [date(2025, m, 1) for m in range(1, 6)]
+        snap_count = 0
+        for key, values in snapshot_data.items():
+            metric = by_key.get(key)
+            if metric is None:
+                continue
+            for period_dt, v in zip(months_2025, values):
+                session.add(
+                    MetricSnapshot(
+                        id=uuid.uuid4(),
+                        company_id=crr.id,
+                        metric_definition_id=metric.id,
+                        period_date=period_dt,
+                        period_type="monthly",
+                        value=Decimal(str(v)),
+                        source="manual",
+                    )
+                )
+                snap_count += 1
+        print(f"  Created {snap_count} CRR metric snapshots")
+
+        # ── CRR QoE run (seeded baseline) ──────────────────────────────────
+        from app.models.esop import QoERun
+        from app.services.qoe.crr_data import CRR_PERIODS, VALUATION_RATIONALE
+        from app.services.qoe.engine import analyze as qoe_analyze
+        from app.services.qoe.valuation import value_by_sde
+
+        crr_qoe = qoe_analyze(CRR_PERIODS, primary_label="FY2024")
+        crr_val = value_by_sde(
+            crr_qoe.primary.sde, 2.0, 2.75, 3.5, rationale=VALUATION_RATIONALE
+        )
+        session.add(
+            QoERun(
+                id=uuid.uuid4(),
+                company_id=crr.id,
+                run_date=date.today(),
+                analysis_period_start=date(2024, 1, 1),
+                analysis_period_end=date(2024, 12, 31),
+                status="draft",
+                reported_ebitda=crr_qoe.primary.reported_ebitda,
+                adjusted_ebitda=crr_qoe.primary.adjusted_ebitda,
+                normalized_ebitda=crr_qoe.primary.sde,
+                evidence_bundle={
+                    "qoe": crr_qoe.as_dict(),
+                    "valuation": crr_val.as_dict(),
+                },
+            )
+        )
+        print("  Created CRR QoE run (FY2024 baseline)")
+
         # ── Labor Burden Assumptions ───────────────────────────────────────
         burden = LaborBurdenAssumption(
             id=uuid.uuid4(),
