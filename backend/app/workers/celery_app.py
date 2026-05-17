@@ -34,6 +34,10 @@ app.config_from_object(
                 "task": "app.workers.financial_tasks.run_daily_dso",
                 "schedule": crontab(hour=7, minute=0),
             },
+            "integrations-sync": {
+                "task": "app.workers.integration_tasks.sync_all_integrations",
+                "schedule": crontab(hour="*/6", minute=15),
+            },
         },
     }
 )
