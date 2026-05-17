@@ -134,6 +134,42 @@ async def seed() -> None:
             f"{acme.legal_name}"
         )
 
+        # ── CRR adaptive business profile + KPI definitions ────────────────
+        from app.models.business import BusinessProfile
+        from app.services.business.profile import (
+            CREDIT_REPAIR_METRICS,
+            build_metric_definitions,
+        )
+
+        crr_profile = BusinessProfile(
+            id=uuid.uuid4(),
+            company_id=crr.id,
+            industry="Credit Repair Services",
+            business_model="subscription",
+            description=(
+                "Credit repair agency: $399 enrollment + $165/mo for 7 months, "
+                "then $9.99/mo maintenance. Proprietary dispute-management software."
+            ),
+            north_star_metric="active_members",
+            growth_goal={
+                "metric_key": "active_members",
+                "current_value": 200,  # placeholder — refined by QoE/metrics ingestion
+                "target_value": 1000,
+                "deadline": "2026-12-31",
+            },
+            source="manual",
+            is_confirmed=True,
+        )
+        session.add(crr_profile)
+        await session.flush()
+        crr_metrics = build_metric_definitions(
+            crr.id, crr_profile.id, CREDIT_REPAIR_METRICS
+        )
+        session.add_all(crr_metrics)
+        print(
+            f"  Created CRR business profile + {len(crr_metrics)} metric definitions"
+        )
+
         # ── Labor Burden Assumptions ───────────────────────────────────────
         burden = LaborBurdenAssumption(
             id=uuid.uuid4(),

@@ -10,6 +10,7 @@ from app.routers import (
     agents,
     approvals,
     auth,
+    business,
     cash,
     contracts,
     customers,
@@ -49,6 +50,7 @@ def create_app() -> FastAPI:
     v1 = settings.API_V1_PREFIX
     app.include_router(auth.router, prefix=f"{v1}/auth", tags=["auth"])
     app.include_router(tenants.router, prefix=f"{v1}/tenants", tags=["tenants"])
+    app.include_router(business.router, prefix=f"{v1}/business", tags=["business"])
     app.include_router(ingestion.router, prefix=f"{v1}/ingestion", tags=["ingestion"])
     app.include_router(staging.router, prefix=f"{v1}/staging", tags=["staging"])
     app.include_router(customers.router, prefix=f"{v1}/customers", tags=["customers"])

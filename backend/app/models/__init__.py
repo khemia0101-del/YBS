@@ -23,6 +23,9 @@ from app.models.core import (
     Tenant,
 )
 
+# Adaptive business profile
+from app.models.business import BusinessProfile, MetricDefinition, MetricSnapshot
+
 # Raw/staged ingestion
 from app.models.raw import RawRecord, StagedRecord
 
@@ -75,6 +78,10 @@ __all__ = [
     "Supervisor",
     "Subcontractor",
     "ComplianceDocument",
+    # business profile
+    "BusinessProfile",
+    "MetricDefinition",
+    "MetricSnapshot",
     # raw
     "RawRecord",
     "StagedRecord",
