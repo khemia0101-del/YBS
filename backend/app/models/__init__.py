@@ -35,6 +35,15 @@ from app.models.automation import AutomationItem
 # Profitability recommendations
 from app.models.profit import ProfitRecommendation
 
+# AI COO
+from app.models.coo import (
+    CooAction,
+    CooConversation,
+    CooMessage,
+    EmployeeMessage,
+    EmployeeTask,
+)
+
 # Raw/staged ingestion
 from app.models.raw import RawRecord, StagedRecord
 
@@ -99,6 +108,12 @@ __all__ = [
     "AutomationItem",
     # profit
     "ProfitRecommendation",
+    # coo
+    "CooConversation",
+    "CooMessage",
+    "CooAction",
+    "EmployeeTask",
+    "EmployeeMessage",
     # raw
     "RawRecord",
     "StagedRecord",

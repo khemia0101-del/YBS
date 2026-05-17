@@ -14,8 +14,10 @@ from app.routers import (
     business,
     cash,
     contracts,
+    coo,
     customers,
     decisions,
+    employee_tasks,
     esop,
     financial,
     growth,
@@ -73,6 +75,10 @@ def create_app() -> FastAPI:
         automation.router, prefix=f"{v1}/automation", tags=["automation"]
     )
     app.include_router(growth.router, prefix=f"{v1}/growth", tags=["growth"])
+    app.include_router(coo.router, prefix=f"{v1}/coo", tags=["coo"])
+    app.include_router(
+        employee_tasks.router, prefix=f"{v1}/employee-tasks", tags=["employee-tasks"]
+    )
     app.include_router(agents.router, prefix=f"{v1}/agents", tags=["agents"])
     app.include_router(approvals.router, prefix=f"{v1}/approvals", tags=["approvals"])
     app.include_router(admin.router, prefix=f"{v1}/admin", tags=["admin"])
