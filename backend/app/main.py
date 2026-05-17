@@ -20,6 +20,7 @@ from app.routers import (
     health,
     ingestion,
     integrations,
+    interview,
     qoe,
     staging,
     tenants,
@@ -65,6 +66,7 @@ def create_app() -> FastAPI:
     app.include_router(decisions.router, prefix=f"{v1}/decisions", tags=["decisions"])
     app.include_router(esop.router, prefix=f"{v1}/esop", tags=["esop"])
     app.include_router(qoe.router, prefix=f"{v1}/qoe", tags=["qoe"])
+    app.include_router(interview.router, prefix=f"{v1}/interview", tags=["interview"])
     app.include_router(agents.router, prefix=f"{v1}/agents", tags=["agents"])
     app.include_router(approvals.router, prefix=f"{v1}/approvals", tags=["approvals"])
     app.include_router(admin.router, prefix=f"{v1}/admin", tags=["admin"])

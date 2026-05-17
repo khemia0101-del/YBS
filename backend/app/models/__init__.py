@@ -26,6 +26,9 @@ from app.models.core import (
 # Adaptive business profile
 from app.models.business import BusinessProfile, MetricDefinition, MetricSnapshot
 
+# AI interview
+from app.models.interview import InterviewInsight, InterviewMessage, InterviewSession
+
 # Raw/staged ingestion
 from app.models.raw import RawRecord, StagedRecord
 
@@ -82,6 +85,10 @@ __all__ = [
     "BusinessProfile",
     "MetricDefinition",
     "MetricSnapshot",
+    # interview
+    "InterviewSession",
+    "InterviewMessage",
+    "InterviewInsight",
     # raw
     "RawRecord",
     "StagedRecord",
