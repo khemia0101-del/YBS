@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import get_current_active_user, require_analyst
+from app.dependencies import assert_company_in_tenant, get_tenant_id, require_analyst
 from app.models.esop import ESOPAdjustment, QoERun, ValuationEvidenceFile
 from app.models.users import User
 from app.schemas.esop import ESOPAdjustmentResponse, QoERunResponse, ValuationPackageResponse
@@ -17,16 +17,29 @@ from app.security.audit import write_audit_log
 router = APIRouter()
 
 
+async def _load_qoe_run_in_tenant(
+    db: AsyncSession, run_id: UUID, tenant_id: UUID
+) -> QoERun:
+    result = await db.execute(select(QoERun).where(QoERun.id == run_id))
+    run = result.scalar_one_or_none()
+    if run is None:
+        raise HTTPException(status_code=404, detail="QoE run not found")
+    await assert_company_in_tenant(db, run.company_id, tenant_id)
+    return run
+
+
 @router.post("/qoe/run", response_model=QoERunResponse)
 async def create_qoe_run(
     company_id: UUID = Query(...),
     period_start: date = Query(...),
     period_end: date = Query(...),
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
     current_user: User = Depends(require_analyst),
 ) -> QoERunResponse:
     import uuid
 
+    await assert_company_in_tenant(db, company_id, tenant_id)
     run = QoERun(
         id=uuid.uuid4(),
         company_id=company_id,
@@ -54,12 +67,9 @@ async def create_qoe_run(
 async def get_qoe_run(
     run_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_active_user),
+    tenant_id: UUID = Depends(get_tenant_id),
 ) -> QoERunResponse:
-    result = await db.execute(select(QoERun).where(QoERun.id == run_id))
-    run = result.scalar_one_or_none()
-    if run is None:
-        raise HTTPException(status_code=404, detail="QoE run not found")
+    run = await _load_qoe_run_in_tenant(db, run_id, tenant_id)
     return QoERunResponse.model_validate(run)
 
 
@@ -67,16 +77,11 @@ async def get_qoe_run(
 async def classify_addbacks(
     run_id: UUID,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
     current_user: User = Depends(require_analyst),
 ) -> dict:
-    """
-    Trigger addback classification. In production this enqueues an AI agent task.
-    """
-    result = await db.execute(select(QoERun).where(QoERun.id == run_id))
-    run = result.scalar_one_or_none()
-    if run is None:
-        raise HTTPException(status_code=404, detail="QoE run not found")
-
+    """Trigger addback classification. In production this enqueues an AI agent task."""
+    await _load_qoe_run_in_tenant(db, run_id, tenant_id)
     try:
         from app.workers.agent_tasks import hermes_daily_loop
 
@@ -90,8 +95,9 @@ async def classify_addbacks(
 async def list_addbacks(
     run_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_active_user),
+    tenant_id: UUID = Depends(get_tenant_id),
 ) -> list[ESOPAdjustmentResponse]:
+    await _load_qoe_run_in_tenant(db, run_id, tenant_id)
     result = await db.execute(
         select(ESOPAdjustment)
         .where(ESOPAdjustment.qoe_run_id == run_id)
@@ -109,8 +115,10 @@ async def approve_addback(
     adj_id: UUID,
     notes: str | None = None,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
     current_user: User = Depends(require_analyst),
 ) -> ESOPAdjustmentResponse:
+    await _load_qoe_run_in_tenant(db, run_id, tenant_id)
     result = await db.execute(
         select(ESOPAdjustment).where(
             ESOPAdjustment.id == adj_id, ESOPAdjustment.qoe_run_id == run_id
@@ -140,15 +148,12 @@ async def approve_addback(
 async def build_valuation_package(
     run_id: UUID,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
     current_user: User = Depends(require_analyst),
 ) -> dict:
     """Build the valuation package (collect evidence files, generate summary)."""
-    result = await db.execute(select(QoERun).where(QoERun.id == run_id))
-    run = result.scalar_one_or_none()
-    if run is None:
-        raise HTTPException(status_code=404, detail="QoE run not found")
+    run = await _load_qoe_run_in_tenant(db, run_id, tenant_id)
 
-    # Fetch evidence files for this run
     files_result = await db.execute(
         select(ValuationEvidenceFile).where(ValuationEvidenceFile.qoe_run_id == run_id)
     )
@@ -173,13 +178,10 @@ async def build_valuation_package(
 async def download_valuation_package(
     run_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_active_user),
+    tenant_id: UUID = Depends(get_tenant_id),
 ) -> ValuationPackageResponse:
     """Return a presigned S3 URL for the valuation package."""
-    result = await db.execute(select(QoERun).where(QoERun.id == run_id))
-    run = result.scalar_one_or_none()
-    if run is None:
-        raise HTTPException(status_code=404, detail="QoE run not found")
+    await _load_qoe_run_in_tenant(db, run_id, tenant_id)
 
     files_result = await db.execute(
         select(ValuationEvidenceFile).where(ValuationEvidenceFile.qoe_run_id == run_id)
@@ -188,7 +190,6 @@ async def download_valuation_package(
 
     expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
 
-    # In production: generate actual presigned URL from S3
     from app.config import settings
 
     download_url = (

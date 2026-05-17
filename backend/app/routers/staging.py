@@ -8,8 +8,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import get_current_active_user, require_operator
-from app.models.raw import StagedRecord
+from app.dependencies import get_tenant_id, require_operator, resolve_scope_company_ids
+from app.models.raw import RawRecord, StagedRecord
 from app.models.users import User
 from app.schemas.common import PaginatedResponse
 from app.schemas.staging import (
@@ -24,6 +24,21 @@ from app.security.audit import write_audit_log
 router = APIRouter()
 
 
+async def _load_staged_in_tenant(
+    db: AsyncSession, exception_id: UUID, allowed: list[UUID]
+) -> StagedRecord:
+    """Fetch a staged record, 404 unless its raw record belongs to the tenant."""
+    result = await db.execute(
+        select(StagedRecord)
+        .join(RawRecord, StagedRecord.raw_record_id == RawRecord.id)
+        .where(StagedRecord.id == exception_id, RawRecord.company_id.in_(allowed))
+    )
+    rec = result.scalar_one_or_none()
+    if rec is None:
+        raise HTTPException(status_code=404, detail="Staged record not found")
+    return rec
+
+
 @router.get("/exceptions", response_model=PaginatedResponse[ExceptionResponse])
 async def list_exceptions(
     status: str | None = Query(None),
@@ -35,9 +50,14 @@ async def list_exceptions(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_active_user),
+    tenant_id: UUID = Depends(get_tenant_id),
 ) -> PaginatedResponse[ExceptionResponse]:
-    q = select(StagedRecord)
+    allowed = await resolve_scope_company_ids(db, tenant_id, None)
+    q = (
+        select(StagedRecord)
+        .join(RawRecord, StagedRecord.raw_record_id == RawRecord.id)
+        .where(RawRecord.company_id.in_(allowed))
+    )
     if status:
         q = q.where(StagedRecord.status == status)
     if record_type:
@@ -73,14 +93,10 @@ async def list_exceptions(
 async def get_exception(
     exception_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_active_user),
+    tenant_id: UUID = Depends(get_tenant_id),
 ) -> ExceptionResponse:
-    result = await db.execute(
-        select(StagedRecord).where(StagedRecord.id == exception_id)
-    )
-    rec = result.scalar_one_or_none()
-    if rec is None:
-        raise HTTPException(status_code=404, detail="Staged record not found")
+    allowed = await resolve_scope_company_ids(db, tenant_id, None)
+    rec = await _load_staged_in_tenant(db, exception_id, allowed)
     return ExceptionResponse.model_validate(rec)
 
 
@@ -89,14 +105,11 @@ async def approve_exception(
     exception_id: UUID,
     body: ApproveRequest,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
     current_user: User = Depends(require_operator),
 ) -> ExceptionResponse:
-    result = await db.execute(
-        select(StagedRecord).where(StagedRecord.id == exception_id)
-    )
-    rec = result.scalar_one_or_none()
-    if rec is None:
-        raise HTTPException(status_code=404, detail="Staged record not found")
+    allowed = await resolve_scope_company_ids(db, tenant_id, None)
+    rec = await _load_staged_in_tenant(db, exception_id, allowed)
     if rec.status not in ("pending", "needs_review"):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -127,14 +140,11 @@ async def reject_exception(
     exception_id: UUID,
     body: ApproveRequest,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
     current_user: User = Depends(require_operator),
 ) -> ExceptionResponse:
-    result = await db.execute(
-        select(StagedRecord).where(StagedRecord.id == exception_id)
-    )
-    rec = result.scalar_one_or_none()
-    if rec is None:
-        raise HTTPException(status_code=404, detail="Staged record not found")
+    allowed = await resolve_scope_company_ids(db, tenant_id, None)
+    rec = await _load_staged_in_tenant(db, exception_id, allowed)
 
     before = {"status": rec.status}
     rec.status = "rejected"
@@ -160,14 +170,11 @@ async def match_exception(
     exception_id: UUID,
     body: MatchRequest,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
     current_user: User = Depends(require_operator),
 ) -> ExceptionResponse:
-    result = await db.execute(
-        select(StagedRecord).where(StagedRecord.id == exception_id)
-    )
-    rec = result.scalar_one_or_none()
-    if rec is None:
-        raise HTTPException(status_code=404, detail="Staged record not found")
+    allowed = await resolve_scope_company_ids(db, tenant_id, None)
+    rec = await _load_staged_in_tenant(db, exception_id, allowed)
 
     before_data = dict(rec.extracted_data or {})
     extracted = dict(rec.extracted_data or {})
@@ -196,13 +203,17 @@ async def match_exception(
 async def bulk_approve(
     body: BulkApproveRequest,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
     current_user: User = Depends(require_operator),
 ) -> dict:
     if not body.ids:
         return {"approved": 0, "failed": []}
 
+    allowed = await resolve_scope_company_ids(db, tenant_id, None)
     result = await db.execute(
-        select(StagedRecord).where(StagedRecord.id.in_(body.ids))
+        select(StagedRecord)
+        .join(RawRecord, StagedRecord.raw_record_id == RawRecord.id)
+        .where(StagedRecord.id.in_(body.ids), RawRecord.company_id.in_(allowed))
     )
     records = result.scalars().all()
     approved = 0
@@ -225,28 +236,39 @@ async def bulk_approve(
 @router.get("/stats", response_model=ExceptionStats)
 async def staging_stats(
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_active_user),
+    tenant_id: UUID = Depends(get_tenant_id),
 ) -> ExceptionStats:
-    total_result = await db.execute(select(func.count(StagedRecord.id)))
+    allowed = await resolve_scope_company_ids(db, tenant_id, None)
+    base = (
+        select(StagedRecord)
+        .join(RawRecord, StagedRecord.raw_record_id == RawRecord.id)
+        .where(RawRecord.company_id.in_(allowed))
+    ).subquery()
+
+    total_result = await db.execute(select(func.count()).select_from(base))
     total = total_result.scalar() or 0
 
     status_rows = await db.execute(
-        select(StagedRecord.status, func.count(StagedRecord.id)).group_by(StagedRecord.status)
+        select(base.c.status, func.count()).select_from(base).group_by(base.c.status)
     )
     by_status = {row[0]: row[1] for row in status_rows}
 
     type_rows = await db.execute(
-        select(StagedRecord.record_type, func.count(StagedRecord.id)).group_by(
-            StagedRecord.record_type
-        )
+        select(base.c.record_type, func.count())
+        .select_from(base)
+        .group_by(base.c.record_type)
     )
     by_record_type = {row[0]: row[1] for row in type_rows}
 
-    avg_conf_result = await db.execute(select(func.avg(StagedRecord.confidence_score)))
+    avg_conf_result = await db.execute(
+        select(func.avg(base.c.confidence_score)).select_from(base)
+    )
     avg_conf = avg_conf_result.scalar()
 
     auto_result = await db.execute(
-        select(func.count(StagedRecord.id)).where(StagedRecord.status == "auto_approved")
+        select(func.count())
+        .select_from(base)
+        .where(base.c.status == "auto_approved")
     )
     auto_count = auto_result.scalar() or 0
     auto_approve_rate = (auto_count / total) if total > 0 else None

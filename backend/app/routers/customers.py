@@ -8,14 +8,29 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import get_current_active_user
-from app.models.core import Company, Contract, Customer
+from app.dependencies import get_tenant_id, resolve_scope_company_ids
+from app.models.core import Contract, Customer
 from app.models.transactions import Invoice
-from app.schemas.common import PaginatedResponse
 from app.schemas.financial import ConcentrationResponse
 from app.utils.money import to_money
 
 router = APIRouter()
+
+
+async def _load_customer_in_tenant(
+    db: AsyncSession, customer_id: UUID, tenant_id: UUID
+) -> Customer:
+    """Fetch a customer, 404 unless it belongs to the caller's tenant."""
+    allowed = await resolve_scope_company_ids(db, tenant_id, None)
+    result = await db.execute(
+        select(Customer).where(
+            Customer.id == customer_id, Customer.company_id.in_(allowed)
+        )
+    )
+    customer = result.scalar_one_or_none()
+    if customer is None:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    return customer
 
 
 @router.get("/")
@@ -25,11 +40,10 @@ async def list_customers(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_active_user),
+    tenant_id: UUID = Depends(get_tenant_id),
 ) -> dict:
-    q = select(Customer)
-    if company_id:
-        q = q.where(Customer.company_id == company_id)
+    allowed = await resolve_scope_company_ids(db, tenant_id, company_id)
+    q = select(Customer).where(Customer.company_id.in_(allowed))
     if is_active is not None:
         q = q.where(Customer.is_active == is_active)
 
@@ -67,13 +81,9 @@ async def list_customers(
 async def get_customer(
     customer_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_active_user),
+    tenant_id: UUID = Depends(get_tenant_id),
 ) -> dict:
-    result = await db.execute(select(Customer).where(Customer.id == customer_id))
-    customer = result.scalar_one_or_none()
-    if customer is None:
-        raise HTTPException(status_code=404, detail="Customer not found")
-
+    customer = await _load_customer_in_tenant(db, customer_id, tenant_id)
     return {
         "id": str(customer.id),
         "company_id": str(customer.company_id),
@@ -96,11 +106,9 @@ async def get_customer_contracts(
     customer_id: UUID,
     status: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_active_user),
+    tenant_id: UUID = Depends(get_tenant_id),
 ) -> dict:
-    result = await db.execute(select(Customer).where(Customer.id == customer_id))
-    if result.scalar_one_or_none() is None:
-        raise HTTPException(status_code=404, detail="Customer not found")
+    await _load_customer_in_tenant(db, customer_id, tenant_id)
 
     q = select(Contract).where(Contract.customer_id == customer_id)
     if status:
@@ -133,11 +141,9 @@ async def get_customer_invoices(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_active_user),
+    tenant_id: UUID = Depends(get_tenant_id),
 ) -> dict:
-    result = await db.execute(select(Customer).where(Customer.id == customer_id))
-    if result.scalar_one_or_none() is None:
-        raise HTTPException(status_code=404, detail="Customer not found")
+    await _load_customer_in_tenant(db, customer_id, tenant_id)
 
     q = select(Invoice).where(Invoice.customer_id == customer_id)
     if status:
@@ -176,18 +182,11 @@ async def get_customer_invoices(
 async def get_concentration_risk(
     customer_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_active_user),
+    tenant_id: UUID = Depends(get_tenant_id),
 ) -> list[ConcentrationResponse]:
-    """
-    Returns concentration analysis for all customers in the same company
-    as the specified customer.
-    """
-    cust_result = await db.execute(select(Customer).where(Customer.id == customer_id))
-    customer = cust_result.scalar_one_or_none()
-    if customer is None:
-        raise HTTPException(status_code=404, detail="Customer not found")
+    """Concentration analysis for all customers in the same company."""
+    customer = await _load_customer_in_tenant(db, customer_id, tenant_id)
 
-    # Get all customers for this company
     all_customers_result = await db.execute(
         select(Customer).where(
             Customer.company_id == customer.company_id, Customer.is_active.is_(True)
@@ -195,7 +194,6 @@ async def get_concentration_risk(
     )
     all_customers = all_customers_result.scalars().all()
 
-    # Compute revenue totals per customer from active contracts
     company_total = Decimal("0")
     customer_revenues: dict[UUID, Decimal] = {}
 

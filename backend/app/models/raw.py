@@ -14,6 +14,9 @@ from app.models.base import Base, UUIDMixin
 class RawRecord(Base, UUIDMixin):
     __tablename__ = "raw_records"
 
+    company_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("companies.id"), nullable=True
+    )
     source_system: Mapped[str] = mapped_column(String(30), nullable=False)
     source_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
     raw_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
@@ -41,6 +44,9 @@ class RawRecord(Base, UUIDMixin):
 class StagedRecord(Base, UUIDMixin):
     __tablename__ = "staged_records"
 
+    company_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("companies.id"), nullable=True
+    )
     raw_record_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("raw_records.id"), nullable=False
     )

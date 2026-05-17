@@ -32,7 +32,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.config import settings
 from app.models.base import Base
-from app.models.core import Company, Contract, Customer, Site
+from app.models.core import Company, Contract, Customer, Site, Tenant
 from app.models.financial import LaborBurdenAssumption
 from app.models.transactions import Invoice, Payment
 from app.models.users import User
@@ -47,9 +47,22 @@ async def seed() -> None:
     async with async_session() as session:
         print("Seeding development data...")
 
+        # ── Tenants ────────────────────────────────────────────────────────
+        # Tenant 1 — the operator's account (runs CRR + other businesses).
+        # Tenant 2 — a separate, isolated tenant proving data isolation.
+        tenant1 = Tenant(
+            id=uuid.uuid4(), name="YBS Holdings", slug="ybs", is_active=True
+        )
+        tenant2 = Tenant(
+            id=uuid.uuid4(), name="Acme Co", slug="acme-co", is_active=True
+        )
+        session.add_all([tenant1, tenant2])
+        print(f"  Created tenants: {tenant1.name}, {tenant2.name}")
+
         # ── Users ──────────────────────────────────────────────────────────
         admin = User(
             id=uuid.uuid4(),
+            tenant_id=tenant1.id,
             email="admin@ybs-os.dev",
             hashed_password=hash_password("admin1234!"),
             full_name="Admin User",
@@ -58,18 +71,31 @@ async def seed() -> None:
         )
         analyst = User(
             id=uuid.uuid4(),
+            tenant_id=tenant1.id,
             email="analyst@ybs-os.dev",
             hashed_password=hash_password("analyst1234!"),
             full_name="Sarah Analyst",
             role="analyst",
             is_active=True,
         )
-        session.add_all([admin, analyst])
-        print(f"  Created users: {admin.email}, {analyst.email}")
+        tenant2_admin = User(
+            id=uuid.uuid4(),
+            tenant_id=tenant2.id,
+            email="admin@acme-co.dev",
+            hashed_password=hash_password("admin1234!"),
+            full_name="Acme Admin",
+            role="admin",
+            is_active=True,
+        )
+        session.add_all([admin, analyst, tenant2_admin])
+        print(
+            f"  Created users: {admin.email}, {analyst.email}, {tenant2_admin.email}"
+        )
 
-        # ── Company ────────────────────────────────────────────────────────
+        # ── Companies ──────────────────────────────────────────────────────
         company = Company(
             id=uuid.uuid4(),
+            tenant_id=tenant1.id,
             legal_name="YBS Building Services LLC",
             dba_name="YBS Clean",
             ein="83-1234567",
@@ -82,8 +108,31 @@ async def seed() -> None:
             founded_date=date(2016, 6, 15),
             acquisition_target=True,
         )
-        session.add(company)
-        print(f"  Created company: {company.legal_name}")
+        # Credit Repair Resources LLC — the acquisition target.
+        crr = Company(
+            id=uuid.uuid4(),
+            tenant_id=tenant1.id,
+            legal_name="Credit Repair Resources LLC",
+            dba_name="Credit Repair Resources",
+            ein="34-1987654",
+            address={"city": "Cleveland", "state": "OH"},
+            founded_date=date(2007, 1, 1),
+            acquisition_target=True,
+        )
+        # A company belonging to the second, isolated tenant.
+        acme = Company(
+            id=uuid.uuid4(),
+            tenant_id=tenant2.id,
+            legal_name="Acme Holdings LLC",
+            dba_name="Acme",
+            founded_date=date(2019, 3, 1),
+            acquisition_target=False,
+        )
+        session.add_all([company, crr, acme])
+        print(
+            f"  Created companies: {company.legal_name}, {crr.legal_name}, "
+            f"{acme.legal_name}"
+        )
 
         # ── Labor Burden Assumptions ───────────────────────────────────────
         burden = LaborBurdenAssumption(
@@ -324,10 +373,15 @@ async def seed() -> None:
         print(f"  Created {invoice_count} invoices with payments")
 
         await session.commit()
-        print("\n✅ Seed complete!")
-        print(f"   Admin login:   admin@ybs-os.dev / admin1234!")
-        print(f"   Analyst login: analyst@ybs-os.dev / analyst1234!")
-        print(f"   Company ID:    {company.id}")
+        print("\nSeed complete!")
+        print(f"   Tenant 1 ({tenant1.name}):")
+        print(f"     Admin login:   admin@ybs-os.dev / admin1234!")
+        print(f"     Analyst login: analyst@ybs-os.dev / analyst1234!")
+        print(f"     Company (YBS): {company.id}")
+        print(f"     Company (CRR): {crr.id}")
+        print(f"   Tenant 2 ({tenant2.name}):")
+        print(f"     Admin login:   admin@acme-co.dev / admin1234!")
+        print(f"     Company (Acme): {acme.id}")
 
     await engine.dispose()
 

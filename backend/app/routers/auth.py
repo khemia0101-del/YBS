@@ -38,8 +38,12 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> Token
     user.last_login_at = datetime.now(timezone.utc)
     db.add(user)
 
-    access_token = create_access_token({"sub": str(user.id)})
-    refresh_token = create_refresh_token({"sub": str(user.id)})
+    claims = {
+        "sub": str(user.id),
+        "tid": str(user.tenant_id) if user.tenant_id else None,
+    }
+    access_token = create_access_token(claims)
+    refresh_token = create_refresh_token(claims)
 
     return TokenResponse(
         access_token=access_token,
@@ -66,9 +70,9 @@ async def refresh_tokens(body: RefreshRequest) -> TokenResponse:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid refresh token",
         )
-    sub = payload["sub"]
-    access_token = create_access_token({"sub": sub})
-    new_refresh = create_refresh_token({"sub": sub})
+    claims = {"sub": payload["sub"], "tid": payload.get("tid")}
+    access_token = create_access_token(claims)
+    new_refresh = create_refresh_token(claims)
     return TokenResponse(
         access_token=access_token,
         refresh_token=new_refresh,

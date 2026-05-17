@@ -20,9 +20,24 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base, TimestampMixin, UUIDMixin
 
 
+class Tenant(Base, UUIDMixin, TimestampMixin):
+    """A platform account. Owns one or more Companies (businesses)."""
+
+    __tablename__ = "tenants"
+
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    slug: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    companies: Mapped[list[Company]] = relationship("Company", back_populates="tenant")
+
+
 class Company(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "companies"
 
+    tenant_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False
+    )
     legal_name: Mapped[str] = mapped_column(Text, nullable=False)
     dba_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     ein: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -31,6 +46,7 @@ class Company(Base, UUIDMixin, TimestampMixin):
     acquisition_target: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # Relationships
+    tenant: Mapped[Tenant] = relationship("Tenant", back_populates="companies")
     customers: Mapped[list[Customer]] = relationship("Customer", back_populates="company")
     supervisors: Mapped[list[Supervisor]] = relationship("Supervisor", back_populates="company")
     subcontractors: Mapped[list[Subcontractor]] = relationship(

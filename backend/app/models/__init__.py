@@ -20,6 +20,7 @@ from app.models.core import (
     Site,
     Subcontractor,
     Supervisor,
+    Tenant,
 )
 
 # Raw/staged ingestion
@@ -66,6 +67,7 @@ __all__ = [
     "User",
     "AuditLog",
     # core
+    "Tenant",
     "Company",
     "Customer",
     "Site",
