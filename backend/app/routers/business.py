@@ -21,8 +21,22 @@ from app.schemas.business import (
     MetricSnapshotResponse,
 )
 from app.services.business.profile import get_or_create_profile
+from app.services.metrics.engine import build_kpi_summary
 
 router = APIRouter()
+
+
+@router.get("/kpi-summary")
+async def kpi_summary(
+    company_id: UUID = Query(...),
+    history_limit: int = Query(12, ge=1, le=120),
+    db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
+) -> dict:
+    """Dashboard KPI roll-up: current value, change, and target progress per metric."""
+    await assert_company_in_tenant(db, company_id, tenant_id)
+    metrics = await build_kpi_summary(db, company_id, history_limit=history_limit)
+    return {"company_id": str(company_id), "metrics": metrics}
 
 
 async def _metric_in_tenant(
