@@ -9,7 +9,13 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import get_current_active_user, require_analyst
+from app.dependencies import (
+    assert_company_in_tenant,
+    get_current_active_user,
+    get_tenant_id,
+    require_analyst,
+    resolve_scope_company_ids,
+)
 from app.models.financial import Decision
 from app.models.users import User
 from app.schemas.common import PaginatedResponse
@@ -29,11 +35,10 @@ async def list_decisions(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_active_user),
+    tenant_id: UUID = Depends(get_tenant_id),
 ) -> PaginatedResponse[DecisionResponse]:
-    q = select(Decision)
-    if company_id:
-        q = q.where(Decision.company_id == company_id)
+    allowed = await resolve_scope_company_ids(db, tenant_id, company_id)
+    q = select(Decision).where(Decision.company_id.in_(allowed))
     if label:
         q = q.where(Decision.label == label)
     if status:
@@ -63,14 +68,15 @@ async def get_recommendations(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_active_user),
+    tenant_id: UUID = Depends(get_tenant_id),
 ) -> PaginatedResponse[DecisionResponse]:
     """All APPROVAL_REQUIRED decisions pending review."""
+    allowed = await resolve_scope_company_ids(db, tenant_id, company_id)
     q = select(Decision).where(
-        Decision.label == "APPROVAL_REQUIRED", Decision.status == "pending"
+        Decision.label == "APPROVAL_REQUIRED",
+        Decision.status == "pending",
+        Decision.company_id.in_(allowed),
     )
-    if company_id:
-        q = q.where(Decision.company_id == company_id)
 
     total_result = await db.execute(select(func.count()).select_from(q.subquery()))
     total = total_result.scalar() or 0
@@ -92,12 +98,13 @@ async def get_recommendations(
 async def get_decision(
     decision_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_active_user),
+    tenant_id: UUID = Depends(get_tenant_id),
 ) -> DecisionResponse:
     result = await db.execute(select(Decision).where(Decision.id == decision_id))
     decision = result.scalar_one_or_none()
     if decision is None:
         raise HTTPException(status_code=404, detail="Decision not found")
+    await assert_company_in_tenant(db, decision.company_id, tenant_id)
     return DecisionResponse.model_validate(decision)
 
 
@@ -106,12 +113,14 @@ async def approve_decision(
     decision_id: UUID,
     notes: str | None = None,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
     current_user: User = Depends(require_analyst),
 ) -> DecisionResponse:
     result = await db.execute(select(Decision).where(Decision.id == decision_id))
     decision = result.scalar_one_or_none()
     if decision is None:
         raise HTTPException(status_code=404, detail="Decision not found")
+    await assert_company_in_tenant(db, decision.company_id, tenant_id)
     if decision.status != "pending":
         raise HTTPException(status_code=409, detail=f"Decision is already '{decision.status}'")
 
@@ -139,12 +148,14 @@ async def reject_decision(
     decision_id: UUID,
     notes: str | None = None,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
     current_user: User = Depends(require_analyst),
 ) -> DecisionResponse:
     result = await db.execute(select(Decision).where(Decision.id == decision_id))
     decision = result.scalar_one_or_none()
     if decision is None:
         raise HTTPException(status_code=404, detail="Decision not found")
+    await assert_company_in_tenant(db, decision.company_id, tenant_id)
 
     before = {"status": decision.status}
     decision.status = "rejected"

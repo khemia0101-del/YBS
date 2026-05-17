@@ -8,16 +8,31 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import get_current_active_user, require_operator
-from app.models.core import Contract
+from app.dependencies import get_tenant_id, require_operator, resolve_scope_company_ids
+from app.models.core import Contract, Customer
 from app.models.financial import ProfitabilityRunLine
 from app.models.transactions import LaborShift
 from app.models.users import User
-from app.schemas.common import PaginatedResponse
 from app.schemas.financial import ProfitabilityRunLineResponse
 from app.security.audit import write_audit_log
 
 router = APIRouter()
+
+
+async def _load_contract_in_tenant(
+    db: AsyncSession, contract_id: UUID, tenant_id: UUID
+) -> Contract:
+    """Fetch a contract, 404 unless it belongs to the caller's tenant."""
+    allowed = await resolve_scope_company_ids(db, tenant_id, None)
+    result = await db.execute(
+        select(Contract)
+        .join(Customer, Contract.customer_id == Customer.id)
+        .where(Contract.id == contract_id, Customer.company_id.in_(allowed))
+    )
+    contract = result.scalar_one_or_none()
+    if contract is None:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    return contract
 
 
 @router.get("/")
@@ -29,9 +44,14 @@ async def list_contracts(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_active_user),
+    tenant_id: UUID = Depends(get_tenant_id),
 ) -> dict:
-    q = select(Contract)
+    allowed = await resolve_scope_company_ids(db, tenant_id, company_id)
+    q = (
+        select(Contract)
+        .join(Customer, Contract.customer_id == Customer.id)
+        .where(Customer.company_id.in_(allowed))
+    )
     if customer_id:
         q = q.where(Contract.customer_id == customer_id)
     if status:
@@ -74,13 +94,9 @@ async def list_contracts(
 async def get_contract(
     contract_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_active_user),
+    tenant_id: UUID = Depends(get_tenant_id),
 ) -> dict:
-    result = await db.execute(select(Contract).where(Contract.id == contract_id))
-    contract = result.scalar_one_or_none()
-    if contract is None:
-        raise HTTPException(status_code=404, detail="Contract not found")
-
+    contract = await _load_contract_in_tenant(db, contract_id, tenant_id)
     return {
         "id": str(contract.id),
         "customer_id": str(contract.customer_id),
@@ -108,8 +124,9 @@ async def get_contract(
 async def get_contract_profitability(
     contract_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_active_user),
+    tenant_id: UUID = Depends(get_tenant_id),
 ) -> ProfitabilityRunLineResponse | None:
+    await _load_contract_in_tenant(db, contract_id, tenant_id)
     result = await db.execute(
         select(ProfitabilityRunLine)
         .where(ProfitabilityRunLine.contract_id == contract_id)
@@ -130,8 +147,9 @@ async def get_contract_labor_detail(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_active_user),
+    tenant_id: UUID = Depends(get_tenant_id),
 ) -> dict:
+    await _load_contract_in_tenant(db, contract_id, tenant_id)
     q = select(LaborShift).where(LaborShift.contract_id == contract_id)
     if date_from:
         q = q.where(LaborShift.shift_date >= date_from)
@@ -181,12 +199,10 @@ async def flag_scope_creep(
     contract_id: UUID,
     details: dict,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
     current_user: User = Depends(require_operator),
 ) -> dict:
-    result = await db.execute(select(Contract).where(Contract.id == contract_id))
-    contract = result.scalar_one_or_none()
-    if contract is None:
-        raise HTTPException(status_code=404, detail="Contract not found")
+    contract = await _load_contract_in_tenant(db, contract_id, tenant_id)
 
     before = {"scope_creep_flag": contract.scope_creep_flag}
     contract.scope_creep_flag = True

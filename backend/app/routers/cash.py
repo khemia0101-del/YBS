@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import get_current_active_user, require_analyst
+from app.dependencies import assert_company_in_tenant, get_tenant_id, require_analyst
 from app.models.financial import CashForecastRun, CashForecastWeek, StressTestRun
 from app.schemas.cash import (
     ForecastRunResponse,
@@ -20,14 +20,30 @@ from app.schemas.cash import (
 router = APIRouter()
 
 
+async def _load_forecast_in_tenant(
+    db: AsyncSession, run_id: UUID, tenant_id: UUID
+) -> CashForecastRun:
+    result = await db.execute(
+        select(CashForecastRun).where(CashForecastRun.id == run_id)
+    )
+    run = result.scalar_one_or_none()
+    if run is None:
+        raise HTTPException(status_code=404, detail="Forecast run not found")
+    await assert_company_in_tenant(db, run.company_id, tenant_id)
+    return run
+
+
 @router.post("/forecast/run")
 async def trigger_forecast(
     company_id: UUID = Query(...),
     beginning_cash: Decimal = Query(...),
     mode: str = Query("baseline"),
+    db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
     _user=Depends(require_analyst),
 ) -> dict:
     """Trigger 13-week cash forecast via Celery."""
+    await assert_company_in_tenant(db, company_id, tenant_id)
     try:
         from app.workers.financial_tasks import build_forecast
 
@@ -39,15 +55,9 @@ async def trigger_forecast(
             "status": "queued",
         }
     except Exception:
-        from app.database import AsyncSessionLocal
         from app.services.cash.forecast_builder import build_13_week_forecast
-        import asyncio
 
-        async def _run():
-            async with AsyncSessionLocal() as session:
-                return await build_13_week_forecast(session, company_id, beginning_cash, mode)
-
-        run_id = asyncio.get_event_loop().run_until_complete(_run())
+        run_id = await build_13_week_forecast(db, company_id, beginning_cash, mode)
         return {"run_id": str(run_id), "company_id": str(company_id), "status": "completed"}
 
 
@@ -55,14 +65,9 @@ async def trigger_forecast(
 async def get_forecast(
     run_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_active_user),
+    tenant_id: UUID = Depends(get_tenant_id),
 ) -> ForecastRunResponse:
-    result = await db.execute(
-        select(CashForecastRun).where(CashForecastRun.id == run_id)
-    )
-    run = result.scalar_one_or_none()
-    if run is None:
-        raise HTTPException(status_code=404, detail="Forecast run not found")
+    run = await _load_forecast_in_tenant(db, run_id, tenant_id)
     return ForecastRunResponse.model_validate(run)
 
 
@@ -70,8 +75,9 @@ async def get_forecast(
 async def get_forecast_weeks(
     run_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_active_user),
+    tenant_id: UUID = Depends(get_tenant_id),
 ) -> list[ForecastWeekResponse]:
+    await _load_forecast_in_tenant(db, run_id, tenant_id)
     result = await db.execute(
         select(CashForecastWeek)
         .where(CashForecastWeek.run_id == run_id)
@@ -85,12 +91,14 @@ async def get_forecast_weeks(
 async def run_stress_test(
     body: StressTestRequest,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
     _user=Depends(require_analyst),
 ) -> StressTestResponse:
     import uuid
     from datetime import date
 
-    # Build baseline forecast first if not provided
+    await assert_company_in_tenant(db, body.company_id, tenant_id)
+
     base_run_id = body.base_forecast_run_id
     if base_run_id is None and body.beginning_cash is not None:
         from app.services.cash.forecast_builder import build_13_week_forecast
@@ -99,14 +107,12 @@ async def run_stress_test(
             db, body.company_id, body.beginning_cash, "baseline"
         )
 
-    # Apply stress factors
     stress_params = {
         "revenue_reduction_pct": str(body.revenue_reduction_pct),
         "ar_delay_days": body.ar_delay_days,
         "payroll_increase_pct": str(body.payroll_increase_pct),
     }
 
-    # Fetch base weeks for stress calc
     results: dict = {}
     if base_run_id:
         weeks_result = await db.execute(
@@ -154,7 +160,7 @@ async def run_stress_test(
 async def get_stress_test(
     run_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_active_user),
+    tenant_id: UUID = Depends(get_tenant_id),
 ) -> StressTestResponse:
     result = await db.execute(
         select(StressTestRun).where(StressTestRun.id == run_id)
@@ -162,6 +168,7 @@ async def get_stress_test(
     run = result.scalar_one_or_none()
     if run is None:
         raise HTTPException(status_code=404, detail="Stress test run not found")
+    await assert_company_in_tenant(db, run.company_id, tenant_id)
     return StressTestResponse.model_validate(run)
 
 
@@ -169,9 +176,10 @@ async def get_stress_test(
 async def get_payroll_coverage(
     company_id: UUID = Query(...),
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_active_user),
+    tenant_id: UUID = Depends(get_tenant_id),
 ) -> dict:
     """Return the latest payroll coverage projection from the most recent forecast."""
+    await assert_company_in_tenant(db, company_id, tenant_id)
     result = await db.execute(
         select(CashForecastRun)
         .where(CashForecastRun.company_id == company_id)

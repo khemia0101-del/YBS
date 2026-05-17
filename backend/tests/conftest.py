@@ -7,15 +7,23 @@ from decimal import Decimal
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.compiler import compiles
 
 from app.models.base import Base
-from app.models.core import Company, Contract, Customer
+from app.models.core import Company, Contract, Customer, Tenant
 from app.models.users import User
 from app.security.auth import hash_password
 
 # Use SQLite in-memory for tests (no Postgres required)
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
+
+
+@compiles(ARRAY, "sqlite")
+def _render_array_as_text_on_sqlite(element, compiler, **kw):
+    """SQLite has no ARRAY type — render it as TEXT so create_all() works."""
+    return "TEXT"
 
 
 @pytest.fixture(scope="session")
@@ -51,9 +59,23 @@ async def db_session(engine) -> AsyncSession:
 
 
 @pytest_asyncio.fixture
-async def sample_company(db_session: AsyncSession) -> Company:
+async def sample_tenant(db_session: AsyncSession) -> Tenant:
+    tenant = Tenant(
+        id=uuid.uuid4(),
+        name="Sample Tenant",
+        slug=f"sample-{uuid.uuid4().hex[:8]}",
+        is_active=True,
+    )
+    db_session.add(tenant)
+    await db_session.flush()
+    return tenant
+
+
+@pytest_asyncio.fixture
+async def sample_company(db_session: AsyncSession, sample_tenant: Tenant) -> Company:
     company = Company(
         id=uuid.uuid4(),
+        tenant_id=sample_tenant.id,
         legal_name="YBS Cleaning Solutions LLC",
         dba_name="YBS Clean",
         ein="12-3456789",

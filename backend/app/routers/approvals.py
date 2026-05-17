@@ -8,7 +8,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import get_current_active_user
+from app.dependencies import (
+    assert_company_in_tenant,
+    get_current_active_user,
+    get_tenant_id,
+    resolve_scope_company_ids,
+)
 from app.models.agent import AgentTask, ApprovalRequest
 from app.models.users import User
 from app.schemas.agents import ApprovalRequestResponse, ApproveActionRequest
@@ -24,12 +29,15 @@ async def list_pending_approvals(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
     current_user: User = Depends(get_current_active_user),
 ) -> PaginatedResponse[ApprovalRequestResponse]:
     """Pending approvals filtered to the current user's role."""
-    q = select(ApprovalRequest).where(ApprovalRequest.status == "pending")
-    if company_id:
-        q = q.where(ApprovalRequest.company_id == company_id)
+    allowed = await resolve_scope_company_ids(db, tenant_id, company_id)
+    q = select(ApprovalRequest).where(
+        ApprovalRequest.status == "pending",
+        ApprovalRequest.company_id.in_(allowed),
+    )
 
     # Filter by required_role — show what this user can act on
     role_map = {
@@ -67,13 +75,13 @@ async def approval_history(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_active_user),
+    tenant_id: UUID = Depends(get_tenant_id),
 ) -> PaginatedResponse[ApprovalRequestResponse]:
+    allowed = await resolve_scope_company_ids(db, tenant_id, company_id)
     q = select(ApprovalRequest).where(
-        ApprovalRequest.status.in_(["approved", "rejected", "expired"])
+        ApprovalRequest.status.in_(["approved", "rejected", "expired"]),
+        ApprovalRequest.company_id.in_(allowed),
     )
-    if company_id:
-        q = q.where(ApprovalRequest.company_id == company_id)
 
     total_result = await db.execute(select(func.count()).select_from(q.subquery()))
     total = total_result.scalar() or 0
@@ -95,7 +103,7 @@ async def approval_history(
 async def get_approval(
     approval_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_active_user),
+    tenant_id: UUID = Depends(get_tenant_id),
 ) -> ApprovalRequestResponse:
     result = await db.execute(
         select(ApprovalRequest).where(ApprovalRequest.id == approval_id)
@@ -103,6 +111,7 @@ async def get_approval(
     req = result.scalar_one_or_none()
     if req is None:
         raise HTTPException(status_code=404, detail="Approval request not found")
+    await assert_company_in_tenant(db, req.company_id, tenant_id)
     return ApprovalRequestResponse.model_validate(req)
 
 
@@ -111,6 +120,7 @@ async def approve_request(
     approval_id: UUID,
     body: ApproveActionRequest,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
     current_user: User = Depends(get_current_active_user),
 ) -> ApprovalRequestResponse:
     result = await db.execute(
@@ -119,6 +129,7 @@ async def approve_request(
     req = result.scalar_one_or_none()
     if req is None:
         raise HTTPException(status_code=404, detail="Approval request not found")
+    await assert_company_in_tenant(db, req.company_id, tenant_id)
     if req.status != "pending":
         raise HTTPException(status_code=409, detail=f"Request is already '{req.status}'")
 
@@ -161,6 +172,7 @@ async def reject_request(
     approval_id: UUID,
     body: ApproveActionRequest,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
     current_user: User = Depends(get_current_active_user),
 ) -> ApprovalRequestResponse:
     result = await db.execute(
@@ -169,6 +181,7 @@ async def reject_request(
     req = result.scalar_one_or_none()
     if req is None:
         raise HTTPException(status_code=404, detail="Approval request not found")
+    await assert_company_in_tenant(db, req.company_id, tenant_id)
     if req.status != "pending":
         raise HTTPException(status_code=409, detail=f"Request is already '{req.status}'")
 

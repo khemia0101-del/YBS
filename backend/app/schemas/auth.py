@@ -24,6 +24,7 @@ class RefreshRequest(BaseModel):
 
 class UserResponse(BaseModel):
     id: UUID
+    tenant_id: UUID | None = None
     email: str
     full_name: str | None
     role: str

@@ -264,6 +264,7 @@ async def _process_file_async(raw_record_id: str) -> dict:
 
         staged = StagedRecord(
             id=uuid.uuid4(),
+            company_id=raw.company_id,
             raw_record_id=raw.id,
             record_type=record_type,
             extracted_data=extracted,

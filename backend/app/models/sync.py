@@ -13,6 +13,9 @@ from app.models.base import Base, UUIDMixin
 class SyncLog(Base, UUIDMixin):
     __tablename__ = "sync_logs"
 
+    company_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("companies.id"), nullable=True
+    )
     source_system: Mapped[str] = mapped_column(Text, nullable=False)
     realm_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime] = mapped_column(

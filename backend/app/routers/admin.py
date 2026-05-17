@@ -8,7 +8,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import require_admin
+from app.dependencies import get_tenant_id, require_admin
 from app.models.audit import AuditLog
 from app.models.users import User
 from app.schemas.auth import UserResponse
@@ -23,10 +23,12 @@ async def list_users(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
     _user=Depends(require_admin),
 ) -> list[UserResponse]:
     result = await db.execute(
         select(User)
+        .where(User.tenant_id == tenant_id)
         .order_by(User.created_at.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
@@ -42,6 +44,7 @@ async def create_user(
     full_name: str | None = None,
     role: str = "viewer",
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
     _user=Depends(require_admin),
 ) -> UserResponse:
     # Check uniqueness
@@ -55,6 +58,7 @@ async def create_user(
 
     user = User(
         id=uuid.uuid4(),
+        tenant_id=tenant_id,
         email=email,
         hashed_password=hash_password(password),
         full_name=full_name,
@@ -73,9 +77,12 @@ async def update_user(
     is_active: bool | None = None,
     full_name: str | None = None,
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
     _user=Depends(require_admin),
 ) -> UserResponse:
-    result = await db.execute(select(User).where(User.id == user_id))
+    result = await db.execute(
+        select(User).where(User.id == user_id, User.tenant_id == tenant_id)
+    )
     user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")

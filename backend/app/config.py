@@ -22,6 +22,17 @@ class Settings(BaseSettings):
     QB_CLIENT_SECRET: str = ""
     QB_REDIRECT_URI: str = ""
     QB_ENVIRONMENT: str = "sandbox"
+    # Plaid (bank account access)
+    PLAID_CLIENT_ID: str = ""
+    PLAID_SECRET: str = ""
+    PLAID_ENV: str = "sandbox"  # sandbox | development | production
+    # Google / Gmail
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    GOOGLE_REDIRECT_URI: str = ""
+    # Anthropic (AI features)
+    ANTHROPIC_API_KEY: str = ""
+    ANTHROPIC_MODEL: str = "claude-opus-4-7"
     SWEPT_API_KEY: str = ""
     SWEPT_API_BASE_URL: str = "https://api.swept.com/v1"
     TELEGRAM_BOT_TOKEN: str = ""

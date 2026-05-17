@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import uuid
 from datetime import datetime, timezone
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import func, select
@@ -10,7 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
-from app.dependencies import get_current_active_user, require_operator
+from app.dependencies import (
+    assert_company_in_tenant,
+    get_current_active_user,
+    get_tenant_id,
+    require_operator,
+    resolve_scope_company_ids,
+)
 from app.models.raw import RawRecord, StagedRecord
 from app.models.sync import IntegrationCredential, SyncLog
 from app.models.users import User
@@ -50,14 +57,18 @@ def _detect_source_system(filename: str, content_type: str) -> str:
 @router.post("/upload", response_model=UploadResponse)
 async def upload_file(
     file: UploadFile = File(...),
+    company_id: UUID = Query(..., description="Business this file belongs to"),
     source_system: str | None = Query(None, description="Override auto-detected source system"),
     db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
     current_user: User = Depends(get_current_active_user),
 ) -> UploadResponse:
     """
     Accept a file upload, compute checksum for dedup, create a RawRecord,
     then enqueue async processing via Celery.
     """
+    await assert_company_in_tenant(db, company_id, tenant_id)
+
     content = await file.read()
     if not content:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
@@ -67,10 +78,12 @@ async def upload_file(
         file.filename or "", file.content_type or ""
     )
 
-    # Duplicate detection by checksum
+    # Duplicate detection by checksum, scoped to this business
     existing = await db.execute(
         select(RawRecord).where(
-            RawRecord.checksum == checksum, RawRecord.is_duplicate.is_(False)
+            RawRecord.checksum == checksum,
+            RawRecord.is_duplicate.is_(False),
+            RawRecord.company_id == company_id,
         )
     )
     original = existing.scalar_one_or_none()
@@ -86,6 +99,7 @@ async def upload_file(
 
     raw = RawRecord(
         id=uuid.uuid4(),
+        company_id=company_id,
         source_system=detected_system,
         source_ref=file.filename,
         raw_payload={"filename": file.filename, "content_type": file.content_type},
@@ -124,14 +138,22 @@ async def upload_file(
 
 
 @router.get("/status", response_model=list[SyncStatusResponse])
-async def sync_status(db: AsyncSession = Depends(get_db)) -> list[SyncStatusResponse]:
+async def sync_status(
+    db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
+) -> list[SyncStatusResponse]:
     """Return last sync time and queue depth per source system."""
+    allowed = await resolve_scope_company_ids(db, tenant_id, None)
     results = []
     for system in SOURCE_SYSTEMS:
         # Latest completed sync log
         latest_result = await db.execute(
             select(SyncLog)
-            .where(SyncLog.source_system == system, SyncLog.status == "completed")
+            .where(
+                SyncLog.source_system == system,
+                SyncLog.status == "completed",
+                SyncLog.company_id.in_(allowed),
+            )
             .order_by(SyncLog.started_at.desc())
             .limit(1)
         )
@@ -141,7 +163,11 @@ async def sync_status(db: AsyncSession = Depends(get_db)) -> list[SyncStatusResp
         queue_q = await db.execute(
             select(func.count(StagedRecord.id))
             .join(RawRecord, StagedRecord.raw_record_id == RawRecord.id)
-            .where(RawRecord.source_system == system, StagedRecord.status == "pending")
+            .where(
+                RawRecord.source_system == system,
+                StagedRecord.status == "pending",
+                RawRecord.company_id.in_(allowed),
+            )
         )
         queue_depth = queue_q.scalar() or 0
 
