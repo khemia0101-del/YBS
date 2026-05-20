@@ -44,6 +44,9 @@ from app.models.coo import (
     EmployeeTask,
 )
 
+# Company brain (RAG)
+from app.models.knowledge import KnowledgeChunk, KnowledgeDocument
+
 # Raw/staged ingestion
 from app.models.raw import RawRecord, StagedRecord
 
@@ -114,6 +117,9 @@ __all__ = [
     "CooAction",
     "EmployeeTask",
     "EmployeeMessage",
+    # knowledge
+    "KnowledgeDocument",
+    "KnowledgeChunk",
     # raw
     "RawRecord",
     "StagedRecord",

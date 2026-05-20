@@ -13,9 +13,11 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.automation import AutomationItem
+from app.models.core import Company
 from app.models.esop import QoERun
 from app.models.profit import ProfitRecommendation
 from app.services.ai import llm_client
+from app.services.knowledge.retriever import format_chunks_for_prompt, retrieve
 from app.services.metrics.engine import build_kpi_summary
 
 COO_SYSTEM = """You are the AI COO of a small business — a sharp, plain-spoken \
@@ -88,7 +90,9 @@ _TOOL_TO_ACTION = {
 }
 
 
-async def build_context(db: AsyncSession, company_id: UUID) -> str:
+async def build_context(
+    db: AsyncSession, company_id: UUID, query: str | None = None
+) -> str:
     """Assemble a compact, live business briefing for the COO."""
     lines: list[str] = []
 
@@ -141,6 +145,18 @@ async def build_context(db: AsyncSession, company_id: UUID) -> str:
             )
             lines.append(f"  - {r.title} ({impact})")
 
+    if query:
+        company = (
+            await db.execute(select(Company).where(Company.id == company_id))
+        ).scalar_one_or_none()
+        if company is not None:
+            chunks = await retrieve(
+                db, company.tenant_id, company_id, query, top_k=6
+            )
+            if chunks:
+                lines.append("Relevant context from the company brain:")
+                lines.append(format_chunks_for_prompt(chunks, max_chars=2500))
+
     return "\n".join(lines) if lines else "No business data has been loaded yet."
 
 
@@ -154,7 +170,7 @@ async def converse(
     Produce the COO's reply. Returns ``{"reply", "proposed_actions"}`` where each
     proposed action is ``{"action_type", "title", "payload"}``.
     """
-    context = await build_context(db, company_id)
+    context = await build_context(db, company_id, query=user_message)
 
     if not llm_client.is_available():
         return {
