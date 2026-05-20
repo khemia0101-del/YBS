@@ -47,6 +47,9 @@ from app.models.coo import (
 # Company brain (RAG)
 from app.models.knowledge import KnowledgeChunk, KnowledgeDocument
 
+# Self-improving monitor
+from app.models.monitor import AgentObservation, MonitorDiagnosis
+
 # Raw/staged ingestion
 from app.models.raw import RawRecord, StagedRecord
 
@@ -120,6 +123,9 @@ __all__ = [
     # knowledge
     "KnowledgeDocument",
     "KnowledgeChunk",
+    # monitor
+    "AgentObservation",
+    "MonitorDiagnosis",
     # raw
     "RawRecord",
     "StagedRecord",

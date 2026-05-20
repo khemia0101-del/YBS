@@ -26,6 +26,7 @@ from app.routers import (
     integrations,
     interview,
     knowledge,
+    monitor,
     qoe,
     staging,
     tenants,
@@ -78,6 +79,7 @@ def create_app() -> FastAPI:
     app.include_router(growth.router, prefix=f"{v1}/growth", tags=["growth"])
     app.include_router(coo.router, prefix=f"{v1}/coo", tags=["coo"])
     app.include_router(knowledge.router, prefix=f"{v1}/knowledge", tags=["knowledge"])
+    app.include_router(monitor.router, prefix=f"{v1}/monitor", tags=["monitor"])
     app.include_router(
         employee_tasks.router, prefix=f"{v1}/employee-tasks", tags=["employee-tasks"]
     )
