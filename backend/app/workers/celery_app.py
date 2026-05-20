@@ -42,6 +42,10 @@ app.config_from_object(
                 "task": "app.workers.monitor_tasks.run_monitor_loop",
                 "schedule": crontab(minute=30),  # hourly
             },
+            "ops-loops-dispatch": {
+                "task": "app.workers.ops_loop_tasks.dispatch_ops_loops",
+                "schedule": crontab(minute="*/5"),
+            },
         },
     }
 )
