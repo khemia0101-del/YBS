@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     # Anthropic (AI features)
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_MODEL: str = "claude-opus-4-7"
+    # Voyage AI (embeddings for the company brain)
+    VOYAGE_API_KEY: str = ""
+    VOYAGE_MODEL: str = "voyage-3"
+    # GitHub (optional — lets the monitor open draft PRs from approved diagnoses)
+    GITHUB_TOKEN: str = ""
+    GITHUB_REPO: str = ""
     SWEPT_API_KEY: str = ""
     SWEPT_API_BASE_URL: str = "https://api.swept.com/v1"
     TELEGRAM_BOT_TOKEN: str = ""

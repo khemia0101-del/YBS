@@ -469,6 +469,41 @@ async def seed() -> None:
 
         print(f"  Created {invoice_count} invoices with payments")
 
+        # ── CRR continuous ops loops ───────────────────────────────────────
+        from app.models.ops_loop import OpsLoop
+
+        session.add_all(
+            [
+                OpsLoop(
+                    id=uuid.uuid4(),
+                    company_id=crr.id,
+                    name="Weekly metrics & funnel review",
+                    focus="metrics",
+                    prompt=(
+                        "Review week-over-week movement in active_members, MRR, "
+                        "new_enrollments, and dispute success rate. Highlight "
+                        "outliers and propose specific, named follow-ups."
+                    ),
+                    schedule_cron="0 9 * * 1",
+                    is_active=True,
+                ),
+                OpsLoop(
+                    id=uuid.uuid4(),
+                    company_id=crr.id,
+                    name="Daily cash health watch",
+                    focus="cash",
+                    prompt=(
+                        "Check cash balance, AR aging, and upcoming committed "
+                        "expenses. Propose action ONLY if cash runway falls "
+                        "below 60 days or AR > 45 days drifts upward."
+                    ),
+                    schedule_cron="0 7 * * *",
+                    is_active=True,
+                ),
+            ]
+        )
+        print("  Created 2 CRR continuous ops loops")
+
         await session.commit()
         print("\nSeed complete!")
         print(f"   Tenant 1 ({tenant1.name}):")

@@ -35,6 +35,24 @@ from app.models.automation import AutomationItem
 # Profitability recommendations
 from app.models.profit import ProfitRecommendation
 
+# AI COO
+from app.models.coo import (
+    CooAction,
+    CooConversation,
+    CooMessage,
+    EmployeeMessage,
+    EmployeeTask,
+)
+
+# Company brain (RAG)
+from app.models.knowledge import KnowledgeChunk, KnowledgeDocument
+
+# Self-improving monitor
+from app.models.monitor import AgentObservation, MonitorDiagnosis
+
+# Continuous ops loops
+from app.models.ops_loop import OpsLoop, OpsLoopRun
+
 # Raw/staged ingestion
 from app.models.raw import RawRecord, StagedRecord
 
@@ -99,6 +117,21 @@ __all__ = [
     "AutomationItem",
     # profit
     "ProfitRecommendation",
+    # coo
+    "CooConversation",
+    "CooMessage",
+    "CooAction",
+    "EmployeeTask",
+    "EmployeeMessage",
+    # knowledge
+    "KnowledgeDocument",
+    "KnowledgeChunk",
+    # monitor
+    "AgentObservation",
+    "MonitorDiagnosis",
+    # ops loops
+    "OpsLoop",
+    "OpsLoopRun",
     # raw
     "RawRecord",
     "StagedRecord",

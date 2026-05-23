@@ -38,6 +38,14 @@ app.config_from_object(
                 "task": "app.workers.integration_tasks.sync_all_integrations",
                 "schedule": crontab(hour="*/6", minute=15),
             },
+            "monitor-loop": {
+                "task": "app.workers.monitor_tasks.run_monitor_loop",
+                "schedule": crontab(minute=30),  # hourly
+            },
+            "ops-loops-dispatch": {
+                "task": "app.workers.ops_loop_tasks.dispatch_ops_loops",
+                "schedule": crontab(minute="*/5"),
+            },
         },
     }
 )
